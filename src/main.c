@@ -48,6 +48,15 @@ int main(int argc, char*argv[]) {
  return 1;
   }
 
+  // set SO_REUSEADDR so that bind() succeeds even if previous connections on this port
+  // are still in TIME_WAIT.
+  // useful to let the server be restarted on the same port immediately.
+  int opt = 1;
+  if (setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+    perror("setsockopt()");
+    return 1;
+  }
+
   if (bind(socket_fd, (struct sockaddr *)&serveraddr, sizeof(serveraddr)) < 0) {
     perror("bind()");
     return 1;
