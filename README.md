@@ -4,6 +4,18 @@
 
 Currently the focus of this project is to create an HTTP server which is compliant with the HTTP/1.0 specification [RFC 1945](https://www.rfc-editor.org/info/rfc1945/).
 
+## Build and run
+
+Requirements: Linux x86-64, gcc, make.
+
+```bash
+make
+# usage: mhttp PORT
+./mhttp 5000
+# clean
+make clean
+```
+
 ## Roadmap
 
 This is a vague roadmap for the project:
