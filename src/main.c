@@ -9,12 +9,17 @@
 #include <signal.h>
 #include <unistd.h>
 
+#include "defs.h"
+
 int pase_port(const char *str);
+
+HTTP_parsed_request parse_request(char *buf, int size);
 
 int main(int argc, char*argv[]) {
   int socket_fd, client_fd, port;
-  int recv_len, sent_len;
+  int recv_len, sent_len, resp_len;
   char buf[4096];
+  HTTP_parsed_request req;
   struct sockaddr_in serveraddr = {
     .sin_family = AF_INET,
     .sin_port = 0,
@@ -40,7 +45,7 @@ int main(int argc, char*argv[]) {
   socket_fd = socket(AF_INET, SOCK_STREAM, 0);
   if (socket_fd < 0) {
     perror("socket()");
-    return 1;
+ return 1;
   }
 
   if (bind(socket_fd, (struct sockaddr *)&serveraddr, sizeof(serveraddr)) < 0) {
@@ -71,9 +76,17 @@ int main(int argc, char*argv[]) {
       continue;
     }
 
+    req = parse_request(buf, recv_len);
+    if (req.result != PARSING_SUCCESS) {
+      close(client_fd);
+      continue;
+    }
+
+    resp_len = snprintf(buf, sizeof(buf), "%s\r\n", req.req.request_uri);
+
     // MSG_NOSIGNAL prevents send() from raising SIGPIPE if the client closes the connection
     // before the response is sent
-    sent_len = send(client_fd, buf, recv_len, MSG_NOSIGNAL);
+    sent_len = send(client_fd, buf, resp_len, MSG_NOSIGNAL);
     if (sent_len < 0) {
       perror("send()");
       // fall-through to close and repeat loop
@@ -95,4 +108,40 @@ int pase_port(const char *str) {
     return -1;
   }
   return n;
+}
+
+HTTP_parsed_request parse_request(char *buf, int size) {
+  const char *uri, *end;
+  int uri_len;
+  HTTP_parsed_request result = {
+    .result = PARSING_ERROR,
+    .req = {
+      .method = HTTP_GET,
+      .request_uri = {0},
+      .version = HTTP_V09
+    }
+  };
+
+  // minimal valid message is "GET a\r\n"
+  if (size < 7 || memcmp(buf, "GET ", 4) != 0) {
+    return result;
+  }
+
+  uri = buf + 4;
+  end = memchr(uri, '\r', size-4);
+  if (end == NULL || end+2 != buf+size || end[1] != '\n') {
+    return result;
+  }
+
+  uri_len = end - uri;
+  // uri_len can be at max REQUEST_URI_LEN-1 long
+  if (uri_len == 0 || uri_len >= REQUEST_URI_LEN) {
+    return result;
+  }
+
+  memcpy(result.req.request_uri, uri, uri_len);
+  result.req.request_uri[uri_len] = '\0';
+  result.result = PARSING_SUCCESS;
+
+  return result;
 }
