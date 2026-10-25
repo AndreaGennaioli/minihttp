@@ -54,16 +54,19 @@ int main(int argc, char*argv[]) {
   int opt = 1;
   if (setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
     perror("setsockopt()");
+    close(socket_fd);
     return 1;
   }
 
   if (bind(socket_fd, (struct sockaddr *)&serveraddr, sizeof(serveraddr)) < 0) {
     perror("bind()");
+    close(socket_fd);
     return 1;
   }
 
   if (listen(socket_fd, 5) < 0) {
     perror("listen()");
+    close(socket_fd);
     return 1;
   }
 
