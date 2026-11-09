@@ -1,3 +1,4 @@
+// clang-format off
 #include <errno.h>
 #include <linux/openat2.h>
 #include <fcntl.h>
