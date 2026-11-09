@@ -1,4 +1,6 @@
 #include <errno.h>
+#include <linux/openat2.h>
+#include <fcntl.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -6,19 +8,27 @@
 #include <netinet/in.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/sendfile.h>
+#include <sys/syscall.h>
 #include <signal.h>
 #include <unistd.h>
 
 #include "defs.h"
 
+#define SENDFILE_CHUNK (1 << 20)   // 1 MiB (2^20) per call
+
 int pase_port(const char *str);
+
+int open_static_file(int root_fd, const char *path);
 
 HTTP_parsed_request parse_request(char *buf, int size);
 
 int main(int argc, char*argv[]) {
   int socket_fd, client_fd, port;
-  int recv_len, sent_len, resp_len;
-  char buf[4096];
+  int recv_len;
+  int root_fd, file_fd;
+  ssize_t nsent;
+  char buf[4096], root_dir[] = "./test/www/";
   HTTP_parsed_request req;
   struct sockaddr_in serveraddr = {
     .sin_family = AF_INET,
@@ -41,6 +51,13 @@ int main(int argc, char*argv[]) {
   }
 
   serveraddr.sin_port = htons((uint16_t) port);
+
+  // open root dir for static file serving
+  root_fd = open(root_dir,  O_RDONLY | O_DIRECTORY);
+  if (root_fd < 0) {
+    fprintf(stderr, "cannot open %s as static file root directory\n", root_dir);
+    return 1;
+  }
 
   socket_fd = socket(AF_INET, SOCK_STREAM, 0);
   if (socket_fd < 0) {
@@ -72,8 +89,11 @@ int main(int argc, char*argv[]) {
 
   // explicitly set Ctrl+C to its default action. (It is already set to SIG_DFL)
   signal(SIGINT, SIG_DFL);
+  // ignoring the signal in case the client closes the connection during write/read
+  signal(SIGPIPE, SIG_IGN);
 
   while(1) {
+    file_fd = -1;
     client_fd = accept(socket_fd, (struct sockaddr *)&clientaddr, &clientaddr_len);
 
     if (client_fd < 0) {
@@ -83,27 +103,29 @@ int main(int argc, char*argv[]) {
 
     recv_len = recv(client_fd, buf, sizeof(buf), 0);
     if (recv_len < 0) {
-      close(client_fd);
       perror("recv()");
-      continue;
+      goto skip_conn;
     }
 
     req = parse_request(buf, recv_len);
     if (req.result != PARSING_SUCCESS) {
-      close(client_fd);
-      continue;
+      goto skip_conn;
     }
 
-    resp_len = snprintf(buf, sizeof(buf), "%s\r\n", req.req.request_uri);
-
-    // MSG_NOSIGNAL prevents send() from raising SIGPIPE if the client closes the connection
-    // before the response is sent
-    sent_len = send(client_fd, buf, resp_len, MSG_NOSIGNAL);
-    if (sent_len < 0) {
-      perror("send()");
-      // fall-through to close and repeat loop
+    file_fd = open_static_file(root_fd, req.req.request_uri);
+    if (file_fd < 0) {
+      perror("error opening static file");
+      goto skip_conn;
     }
 
+    while ((nsent = sendfile(client_fd, file_fd, NULL, SENDFILE_CHUNK)) > 0);
+    if (nsent == -1) {
+      perror("sendfile()");
+    }
+
+  skip_conn:
+    if (file_fd != -1)
+      close(file_fd);
     close(client_fd);
   }
 
@@ -120,6 +142,17 @@ int pase_port(const char *str) {
     return -1;
   }
   return n;
+}
+
+int open_static_file(int root_fd, const char *path) {
+  struct open_how oh = {0};
+  oh.flags = O_RDONLY | OPENAT2_REGULAR;
+  oh.resolve = RESOLVE_IN_ROOT | RESOLVE_NO_MAGICLINKS;
+  int fd = syscall(SYS_openat2, root_fd, path, &oh, sizeof(struct open_how));
+  if (fd < 0) {
+    return -1;
+  }
+  return fd;
 }
 
 HTTP_parsed_request parse_request(char *buf, int size) {
