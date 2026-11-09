@@ -21,7 +21,7 @@ make clean
 This is a vague roadmap for the project:
 
 - [x] [HTTP/0.9](https://www.w3.org/Protocols/HTTP/AsImplemented.html) server that returns a static response
-- [ ] Request URI parsing and static file serving
+- [x] Request URI parsing and static file serving
 - [ ] HTTP/1.0 request line, headers and status line
 - [ ] `GET`, `HEAD` and `POST` methods
 - [ ] Conditional `GET`
